@@ -1,108 +1,214 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #!/bin/env bash
+
+# Copyright (c) Ruhollah 2016 
+# Copyright (c) mast3rz3ro 2024
 
 usage()
 {
    echo help
 }
 
-config()
+printd ()
 {
-   mkdir -p "./tmp"
- if [ ! -d "./tmp" ]; then
-   printf "An error occurred while trying to create './tmp' dir.\n"
-   exit 1
- fi
+	if [ "$verbose" = "yes" ]; then
+		printf "$1"
+	fi
+}
+
+func_config()
+{
+		# check system
+	if [[ "$(printf "$PREFIX")" = *"com.termux"* ]]; then
+		tmp="/sdcard/Android/media/tmp"
+		printd "[v] Running on host: termux=android\n"
+	else
+		printd "[v] Running on host: Linux/GNU\n"
+		tmp=~/tmp
+	fi
+			# tmp directory
+			mkdir -p "$tmp"
+		if [ ! -d "$tmp" ] || [ ! -w "$tmp" ]; then
+			printf "Error can not write into: '$tmp'.\n"
+			exit 1
+		fi
+		# output dir
+	if [ -z "$1" ]; then
+		target_dir="./input"
+		output_mode="normal"
+		output_dir="./renamed"
+	else
+		target_dir=$@
+		output_mode="dynamic"
+		output_dir="none"
+	fi
+		printd "[v] Target directory: '${target_dir}'\n"
+		printf -- "- - - - - - - - - - - - - - - - - - - -\n"
+}
+
+func_find_apk()
+{
+	# find apk
+		index="0"
+	find "$target_dir" -type f | while read f; do
+		if [ -s "$f" ]; then
+				old_name="${f##*/}"
+			if [ "$output_mode" = "dynamic" ]; then
+				output_dir="${f%/*}"
+			fi
+				rename "$f"
+				index=$((index+1))
+		else
+				printd "[v] Skipping none file: '${f}'\n"
+		fi
+	done
+			printf "[x] Total procesedd APKS: $index\n"
 }
 
 rename() {
-        printd "[v] Currently dealing with: '$1'\n"
-        check_zip="$(file $1)"
-    if [[ "$check_zip" != *"archive"* ]]; then
-        printd "[v] Skipping since it is not zip: '$1'\n"
-        return
-    fi
-        apk_contents="$(unzip -lq "$1" | grep -E "\.apk|resources.arsc")"
-        apk_type="$(printf -- "$apk_contents" | grep -E "\.apk|resources.arsc" | grep -ivE "archive:|assets/|config\..*\.apk|split_.*\.apk")"
-	if [[ "$apk_type" = *"resources.arsc"* ]]; then
-	   local type="1"
-	   local native_arch=""
-	   suffix="apk"
-	   x="$1"
-	elif [[ "$apk_type" = *".apk"* ]]; then
-	   local type="2"
-	   base_apk="$(printf -- "$apk_type" | awk '{print $4}')"
-	   printd "[v] Base APK: '$base_apk'\n"
-	   native_arch="$(printf -- "$apk_contents" | grep -iE "x86|arm|mips" | awk '{print $4}' | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
-	   printd "[v] Native Arch: '$native_arch'\n"
-	   unzip -poq "$1" "$base_apk">./tmp/base.apk
-	   suffix="apks"
-	   x="./tmp/base.apk"
+		printd "[v] Processing file: '${1}'\n"
+		local check_zip="$(file "${1}")"
+	if [[ "$check_zip" != *"Zip archive"* ]]; then
+		if [[ "$check_zip" != *"Android package"* ]]; then
+			if [[ "$check_zip" != *" Java archive"* ]]; then
+				printd "[v] Skipping since it is not zip nor apk or even a jar: '${1}'\n"
+				return
+			fi
+		fi
+	fi
+
+		# determine apk type
+		printd "[v] Getting file contents..\n"
+		local file_content="$(unzip -lqq "$1" | grep -E "\.apk|resources.arsc|\.RSA|\.DSA" | awk '{print $4}')"
+		local void="$(printf "${file_content}" | tr '\n' ' ')"
+		printd "[v] File contents: '${void}'\n"
+		
+		local file_content2="$(printf -- "$file_content" | grep -E "\.apk|resources.arsc" | grep -ivE "archive:|assets/|config\..*\.apk|split_.*\.apk|.*/.*\.apk")"
+		printd "[v] File contents (filtered): '${file_content2}'\n"
+
+	if [[ "$file_content2" = *"resources.arsc"* ]]; then
+		printd "[v] Target type: APK\n"
+		local multi_bundle="no"
+		local native_arch=""
+		local suffix="apk"
+		local x="$1"
+	elif [[ "$file_content2" = *".apk"* ]]; then
+		printd "[v] Target type: Multi-Bundle\n"
+		local multi_bundle="yes"
+		local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk '{print $4}' | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
+		if [ -z "$native_arch" ]; then
+			local native_arch="NoNative"
+		fi
+		printd "[v] Native Arch: '$native_arch'\n"
+		printd "[v] Extracting base APK: '$file_content2'\n"
+		printd "[v] Extracting as: '${tmp}/base.apk'\n"
+		unzip -pqq "$1" "$file_content2">"${tmp}/base.apk"
+		local suffix="apks"
+		local x="${tmp}/base.apk"
 	else
-		echo "[!] faild to detect APK type of: $1"
-		printf "[!] faild to detect APK type of: ${1}\napk_type=\"${apk_type}\"\ncontents:\n$(unzip -l "$1" | head -n20)\n\n">>opertion.log
+		printd "[!] faild to detect APK type of: '$1'\n"
 		return
 	fi
-	local manifest=$(aapt d badging "$x")
-	local label=$(echo $manifest | grep -Po "(?<=application: label=')(.+?)(?=')")
-	local package_name=$(echo $manifest | grep -Po "(?<=package: name=')(.+?)(?=')")
-	local version_code=$(echo $manifest | grep -Po "(?<=versionCode=')(.+?)(?=')")
-	local version_name=$(echo $manifest | grep -Po "(?<=versionName=')(.+?)(?=')")
-	local min_sdk=$(echo $manifest | grep -Po "(?<=sdkVersion:')(.+?)(?=')")
-	local max_sdk=$(echo $manifest | grep -Po "(?<=targetSdkVersion:')(.+?)(?=')")
-if [ -z "$native_arch" ]; then
-	local native_arch=$(echo $manifest | grep -Po "(?<=native-code: ')(.*)")
-fi
-if [ -z "$native_arch" ]; then
-   local native_arch="NoNative"
-fi
+		
+		# parsing time
+		local manifest=$(aapt d badging "$x")
+		local label=$(echo $manifest | grep -Po "(?<=application: label=')(.+?)(?=')")
+		local package_name=$(echo $manifest | grep -Po "(?<=package: name=')(.+?)(?=')")
+		local version_code=$(echo $manifest | grep -Po "(?<=versionCode=')(.+?)(?=')")
+		local version_name=$(echo $manifest | grep -Po "(?<=versionName=')(.+?)(?=')")
+		local min_sdk=$(echo $manifest | grep -Po "(?<=sdkVersion:')(.+?)(?=')")
+		local max_sdk=$(echo $manifest | grep -Po "(?<=targetSdkVersion:')(.+?)(?=')")
+		sdk_ver $min_sdk $max_sdk
+	if [ "$multi_bundle" = "no" ]; then
+		local native_arch=$(echo $manifest | grep -Po "(?<=native-code: ')(.*)")
+	fi
+
+		# signtrue check
+		printd "[v] Checking the signature..\n"
+		#cert="$(unzip -lqq "$x" | grep -E "\.RSA|\.DSA")"
+		signature="$(grep -Fcm1 "android@android.com" "$x")"
+	if [ ! -z "$cert" ]; then
+		signature="$(unzip -pqq "$x" "$cert" | grep -Fcm1 "android@android.com")"
+	else
+		signature="$(grep -Fcm1 "android@android.com" "$x")"
+	fi
+	if [ "$signature" = "1" ]; then
+		#stamp="$(md5 "$x" | awk '{print $2}')"
+		stamp="modified"
+		printd "[v] Detected signature: 'Android Debug'\n"
+	else
+		stamp="vertified"
+		printd "[v] Detected signature: 'Private'\n"
+	fi
 
     # combine stage
-	local pattern_name="${label}_(v${version_name}-${version_code}-${min_sdk}-${max_sdk})_(${package_name}_${native_arch}).$suffix"
-	local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'")
+	local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
+	local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
 
 	echo
-	mv -f "$1" "renamed/$final_name"
-	echo "[!] Old name: $1"
+	mv -f "$1" "$output_dir/$final_name"
+	echo "[!] APK Location: $output_dir"
+	echo "[!] Old name: $old_name"
 	echo "[x] New name: $final_name"
 	echo
-	echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - "
+	printf -- "- - - - - - - - - - - - - - - - - - - -\n"
 	echo
 }
 
-sdk_version ()
+sdk_ver()
 {
-#signtrue
-min_sdk="n"
-max_sdk="n"
+
+	local min_sdk="$1"
+	local max_sdk="$2"
+	# SDK reversion to Android reversion
+sdk_list="\
+	sdk35=15 \
+	sdk34=14 \
+	sdk33=13 \
+	sdk32=12.1L \
+	sdk31=12 \
+	sdk30=11 \
+	sdk29=10 \
+	sdk28=9 \
+	sdk27=8.1 \
+	sdk26=8.0 \
+	sdk25=7.1 \
+	sdk24=7.0 \
+	sdk23=6.0 \
+	sdk22=5.1.1 \
+	sdk21=5.0 \
+	sdk20=4.4W \
+	sdk19=4.4 \
+	sdk18=4.3 \
+	sdk17=4.2 \
+	sdk16=4.1 \
+	sdk15=4.0.3 \
+	sdk14=4.0 \
+	sdk13=3.2 \
+	sdk12=3.1.x \
+	sdk11=3.0.x \
+	sdk10=2.3.3 \
+	sdk9=2.3 \
+	sdk8=2.2.2 \
+	sdk7=2.1.x \
+	sdk6=2.0.1 \
+	sdk5=2.0
+"
+
+		# find version
+	for sdk in $sdk_list; do
+		if [[ "$sdk" = "sdk${min_sdk}"* ]]; then
+			min_ver="android-$(printf "$sdk" | sed 's/.*=//')"
+		elif [[ "$sdk" = "sdk${max_sdk}"* ]]; then
+			max_ver="android-$(printf "$sdk" | sed 's/.*=//')"
+		fi
+	done
+			# if no ver found !
+		if [ -z "$min_ver" ]; then
+			min_ver="sdk${min_sdk}"
+		elif [ -z "$max_ver" ]; then
+			max_ver="sdk${max_sdk}"
+		fi
 }
 
-printd ()
-{
-if [ "$verbose" = "yes" ]; then
-   printf "$1"
-fi
-}
-
-config
-for apk in input/*
-do
- if [ -s "$apk" ]; then
-	rename "$apk"
- fi
-done
+	func_config $@
+	func_find_apk
