@@ -3,9 +3,10 @@
 # Copyright (c) Ruhollah 2016 
 # Copyright (c) mast3rz3ro 2024
 
-usage()
+func_usage()
 {
-   echo help
+	printf "help\n"
+	exit 0
 }
 
 printd ()
@@ -15,33 +16,56 @@ printd ()
 	fi
 }
 
+func_mkdir()
+{
+		if [ ! -d "$1" ]; then
+			printf "[x] Creating directory: '$1'\n"
+			mkdir -p "$1"
+		fi
+		if [ ! -w "$1" ]; then
+			printf "[!] Error can not write into: '$1'.\n"
+			exit 1
+		fi
+}
+
 func_config()
 {
 		# check system
-	if [[ "$(printf "$PREFIX")" = *"com.termux"* ]]; then
+	if [[ "$PREFIX" = *"com.termux"* ]]; then
 		tmp="/sdcard/Android/media/tmp"
+		library_dir="/sdcard/Android/media/APK-Library"
 		printd "[v] Running on host: termux-android\n"
 	else
-		printd "[v] Running on host: Linux/GNU\n"
 		tmp=~/tmp
+		library_dir="/sdcard/Android/media/APK-Library"
+		printd "[v] Running on host: Linux/GNU\n"
 	fi
-			# tmp directory
-			mkdir -p "$tmp"
-		if [ ! -d "$tmp" ] || [ ! -w "$tmp" ]; then
-			printf "Error can not write into: '$tmp'.\n"
-			exit 1
+			# makevtmp dir
+			func_mkdir "$tmp"
+
+		# target/input dir
+	if [ -z "$target_dir" ]; then
+		if [ -d "./input" ]; then
+			target_dir="./input"
+		else
+			exit 0
 		fi
+	fi
 		# output dir
-	if [ -z "$1" ]; then
-		target_dir="./input"
+	if [ -z "$output_dir" ]; then
 		output_mode="normal"
 		output_dir="./renamed"
 	else
-		target_dir=$@
 		output_mode="dynamic"
-		output_dir="none"
+		# library dir
+		if [ "$library_mode" = "yes" ]; then
+				func_mkdir "$library_dir"
+		fi
 	fi
+		# make output dir
+		func_mkdir "$output_dir"
 		printd "[v] Target directory: '${target_dir}'\n"
+		printd "[v] Output directory: '${output_dir}'\n"
 		printf "${0}: func_config: $(date)\n">>"$tmp/opertion.log"
 		printf -- "- - - - - - - - - - - - - - - - - - - -\n"
 }
@@ -107,10 +131,12 @@ func_find_apk()
 			fi
 				func_process_apk "$f"
 		else
-			printd "[v] Skipping none file: '${f}'\n"
+			printd "[v] Skipping none/empty file: '${f}'\n"
 		fi
 	done< <( find "$target_dir" -type f )
+	if [ "$total_files" != "0" ]; then
 		func_stats
+	fi
 }
 
 func_process_apk()
@@ -263,6 +289,18 @@ sdk_list="\
 			max_ver="sdk${max_sdk}"
 		fi
 }
+
+while getopts i:o:l option
+		do
+				case "${option}"
+		in
+				i) target_dir="${OPTARG}";;
+				o) output_dir="${OPTARG}";;
+				l) library_mode="yes";;
+				?) func_usage;;
+			esac
+done
+                
 
 	func_config $@
 	func_find_apk
