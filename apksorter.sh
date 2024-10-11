@@ -1,7 +1,10 @@
 #!/bin/env bash
 
-# Copyright (c) Ruhollah 2016 
+# Copyright (c) Ruhollah 2016
 # Copyright (c) mast3rz3ro 2024
+# This fork are licensed under GNU GPL-2.0-only
+# USING THIS FORK WILL ENFORCE YOU TO FOLLOW THE GNU GPL-2.0-only LICENSE.
+
 
 func_usage()
 {
