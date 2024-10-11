@@ -11,7 +11,7 @@ usage()
 printd ()
 {
 	if [ "$verbose" = "yes" ]; then
-		printf "$1"
+		printf -- "$1"
 	fi
 }
 
@@ -20,7 +20,7 @@ func_config()
 		# check system
 	if [[ "$(printf "$PREFIX")" = *"com.termux"* ]]; then
 		tmp="/sdcard/Android/media/tmp"
-		printd "[v] Running on host: termux=android\n"
+		printd "[v] Running on host: termux-android\n"
 	else
 		printd "[v] Running on host: Linux/GNU\n"
 		tmp=~/tmp
@@ -42,29 +42,79 @@ func_config()
 		output_dir="none"
 	fi
 		printd "[v] Target directory: '${target_dir}'\n"
+		printf "${0}: func_config: $(date)\n">>"$tmp/opertion.log"
 		printf -- "- - - - - - - - - - - - - - - - - - - -\n"
+}
+
+func_rename()
+{
+	# mv error handling
+	local mv_src="$1"
+	local mv_dst="$2"
+	while read x; do
+			printd "func_rename: mv_cmd: ${x}\n"
+		if [[ "$x" = "renamed "* ]]; then
+			mv_err0=$((mv_err0+1))
+		elif [[ "$x" = *"are the same file"* ]]; then
+			mv_err2=$((mv_err2+1))
+		elif [[ "$x" = *"Operation not permitted"* ]]; then
+			mv_err3=$((mv_err3+1))
+			printf "${0}: func_rename: mv_err3: $x\n">>"$tmp/opertion.log"
+		else
+			mv_err1=$((mv_err1+1))
+			printf "${0}: func_rename: mv_err1: $x\n">>"$tmp/opertion.log"
+		fi
+	done< <( mv -v "$mv_src" "$mv_dst"  2>&1)
+}
+
+func_stats ()
+{
+	if [ -z "$mv_err0" ]; then
+		mv_err0="0"
+	fi
+	if [ -z "$mv_err1" ]; then
+		mv_err1="0"
+	fi
+	if [ -z "$mv_err2" ]; then
+		mv_err2="0"
+	fi
+	if [ -z "$mv_err3" ]; then
+		mv_err3="0"
+	fi
+		local total_skipped="$(expr "$total_files" - "$total_apk")"
+		local total_rename_fails="$(expr "$mv_err1" + "$mv_err2" + "$mv_err3" )"
+		printf "[x] Total proccedd APK: ${total_apk}\n"
+		printf "[x] Total skipped none APK: ${total_skipped}\n"
+		printf "[x] Total successfully renamed (mv cmd): ${mv_err0}\n"
+		printf "[x] Total failed to rename (mv cmd): ${total_rename_fails}\n"
+		printd "[v] Total already renamed (mv cmd): ${mv_err2}\n"
+		printd "[v] Total permission denied (mv cmd): ${mv_err3}\n"
+		printd "[v] Total unknown error (mv cmd): ${mv_err1}\n"
 }
 
 func_find_apk()
 {
+	# index func_stats
+		local total_files="0"
+		total_apk="0"
 	# find apk
-		index="0"
-	find "$target_dir" -type f | while read f; do
+	while read f; do
 		if [ -s "$f" ]; then
-				old_name="${f##*/}"
+			local total_files=$((total_files+1))
+			old_name="${f##*/}"
 			if [ "$output_mode" = "dynamic" ]; then
 				output_dir="${f%/*}"
 			fi
-				rename "$f"
-				index=$((index+1))
+				func_process_apk "$f"
 		else
-				printd "[v] Skipping none file: '${f}'\n"
+			printd "[v] Skipping none file: '${f}'\n"
 		fi
-	done
-			printf "[x] Total procesedd APKS: $index\n"
+	done< <( find "$target_dir" -type f )
+		func_stats
 }
 
-rename() {
+func_process_apk()
+{
 		printd "[v] Processing file: '${1}'\n"
 		local check_zip="$(file "${1}")"
 	if [[ "$check_zip" != *"Zip archive"* ]]; then
@@ -108,7 +158,8 @@ rename() {
 		printd "[!] faild to detect APK type of: '$1'\n"
 		return
 	fi
-		
+		total_apk=$((total_apk+1))
+
 		# parsing time
 		local manifest=$(aapt d badging "$x")
 		local label=$(echo $manifest | grep -Po "(?<=application: label=')(.+?)(?=')")
@@ -119,7 +170,10 @@ rename() {
 		local max_sdk=$(echo $manifest | grep -Po "(?<=targetSdkVersion:')(.+?)(?=')")
 		sdk_ver $min_sdk $max_sdk
 	if [ "$multi_bundle" = "no" ]; then
-		local native_arch=$(echo $manifest | grep -Po "(?<=native-code: ')(.*)")
+		local native_arch="$(echo $manifest | grep -Po "(?<=native-code: ')(.*)")"
+			if [ -z "$native_arch" ]; then
+				local native_arch="NoNative"
+			fi
 	fi
 
 		# signtrue check
@@ -142,10 +196,10 @@ rename() {
 
     # combine stage
 	local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
-	local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
+	local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
 
 	echo
-	mv -f "$1" "$output_dir/$final_name"
+	func_rename "$1" "$output_dir/$final_name"
 	echo "[!] APK Location: $output_dir"
 	echo "[!] Old name: $old_name"
 	echo "[x] New name: $final_name"
