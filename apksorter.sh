@@ -12,6 +12,18 @@ func_usage()
 	exit 0
 }
 
+func_deps()
+{
+		deps="file unzip aapt"
+	for dep in $deps; do
+			b="$(which "$dep")"
+		if [ ! -s "$b" ]; then
+			printf "[!] This utility cannot run without $dep\n"
+			exit 1
+		fi
+	done
+}
+
 printd()
 {
 	if [ "$verbose" = "yes" ]; then
@@ -386,5 +398,6 @@ while getopts i:o:l option
 			esac
 done
 
+	func_deps
 	func_config $@
 	func_find_apk
