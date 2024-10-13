@@ -12,7 +12,7 @@ func_usage()
 	exit 0
 }
 
-printd ()
+printd()
 {
 	if [ "$verbose" = "yes" ]; then
 		printf -- "$1"
@@ -40,10 +40,10 @@ func_config()
 		printd "[v] Running on host: termux-android\n"
 	else
 		tmp=~/tmp
-		library_dir="/sdcard/Android/media/APK-Library"
+		library_dir=~/APK-Library
 		printd "[v] Running on host: Linux/GNU\n"
 	fi
-			# makevtmp dir
+			# make tmp dir
 			func_mkdir "$tmp"
 
 		# target/input dir
@@ -55,20 +55,24 @@ func_config()
 		fi
 	fi
 		# output dir
-	if [ -z "$output_dir" ]; then
-		output_mode="normal"
-		output_dir="./renamed"
+	if [ "$target_dir" = "./input" ] || [ "$target_dir" = "input" ]; then
+		if [ -z "$output_dir" ]; then
+			output_mode="normal"
+			output_dir="./renamed"
+			func_mkdir "$output_dir"
+		fi
 	else
 		output_mode="dynamic"
-		# library dir
-		if [ "$library_mode" = "yes" ]; then
-				func_mkdir "$library_dir"
-		fi
 	fi
-		# make output dir
-		func_mkdir "$output_dir"
+		# overwrite with library dir
+	if [ "$library_mode" = "yes" ]; then
+			output_mode="library"
+			output_dir="$library_dir"
+			func_mkdir "$output_dir"
+	fi
 		printd "[v] Target directory: '${target_dir}'\n"
 		printd "[v] Output directory: '${output_dir}'\n"
+		printd "[v] Output mode: '${output_mode}'\n"
 		printf "${0}: func_config: $(date)\n">>"$tmp/opertion.log"
 		printf -- "- - - - - - - - - - - - - - - - - - - -\n"
 }
@@ -78,11 +82,21 @@ func_rename()
 	# mv error handling
 	local mv_src="$1"
 	local mv_dst="$2"
+	local src_file="${mv_src##*/}"
+	local dst_file="${mv_dst##*/}"
+	local src_dir="${mv_src%/*}"
+	local dst_dir="${mv_dst%/*}"
+	
+	printf "[!] APK Location: '$src_dir'\n"
+	printf "[x] Output Location: '$dst_dir'\n"
+	printf "[!] Old name: '$src_file'\n"
+	printf "[x] New name: '$dst_file'\n"
+	
 	while read x; do
 			printd "func_rename: mv_cmd: ${x}\n"
 		if [[ "$x" = "renamed "* ]]; then
 			mv_err0=$((mv_err0+1))
-		elif [[ "$x" = *"are the same file"* ]]; then
+		elif [[ "$x" = *"are the same file"* ]] || [[ "$x" = *"Skipping overwritting"* ]]; then
 			mv_err2=$((mv_err2+1))
 		elif [[ "$x" = *"Operation not permitted"* ]]; then
 			mv_err3=$((mv_err3+1))
@@ -91,7 +105,30 @@ func_rename()
 			mv_err1=$((mv_err1+1))
 			printf "${0}: func_rename: mv_err1: $x\n">>"$tmp/opertion.log"
 		fi
-	done< <( mv -v "$mv_src" "$mv_dst"  2>&1)
+	done< <( if [ -s "$mv_dst" ]; then printf "[!] Skipping overwritting: '$mv_dst'\n"; else mv -v "$mv_src" "$mv_dst"  2>&1; fi)
+}
+
+func_dup_rename()
+{
+		local label="$1"
+		local suffix="$2"
+		local library_dir="$3"
+		local src="$4"
+		local dst="${library_dir}/${label}/${5}"
+	if [ ! -d "$library_dir/${label}" ]; then
+		func_mkdir "${library_dir}/${label}"
+	fi
+	
+	# increasment rename (pain!)
+	local i=0
+	while [ -e "$src" ]; do
+	local i=$((i+1))
+		if [ ! -e "${dst}.${suffix}" ]; then
+			func_rename "$src" "${dst}.${suffix}"
+		elif [ ! -e "${dst}_${i}.${suffix}" ]; then
+			func_rename "$src" "${dst}_${i}.${suffix}"
+		fi
+	done
 }
 
 func_stats ()
@@ -129,6 +166,7 @@ func_find_apk()
 		if [ -s "$f" ]; then
 			local total_files=$((total_files+1))
 			old_name="${f##*/}"
+			target_dir="${f%/*}"
 			if [ "$output_mode" = "dynamic" ]; then
 				output_dir="${f%/*}"
 			fi
@@ -139,6 +177,9 @@ func_find_apk()
 	done< <( find "$target_dir" -type f )
 	if [ "$total_files" != "0" ]; then
 		func_stats
+	else
+		printf "[!] The target directory is empty: '${output_dir}'\n"
+		exit 0
 	fi
 }
 
@@ -170,10 +211,25 @@ func_process_apk()
 		local native_arch=""
 		local suffix="apk"
 		local x="$1"
+		local src_apk="$1"
+	elif [ "$(printf "$file_content" | grep -ocF ".apk")" = "1" ]; then
+		printd "[v] Target type: APK\n"
+		local multi_bundle="no"
+		local native_arch=""
+		local suffix="apk"
+		local apk="$(printf -- "$file_content" | grep -F ".apk")"
+		printd "[v] Extracting APK: '$apk'\n"
+		printd "[v] Extracting as: '${tmp}/base.apk'\n"
+		unzip -pqq "$1" "$apk">"${tmp}/base.apk"
+		printd "[v] Moving unneedeed file into: '${tmp}/base_bak.apk'\n"
+		mv --backup=t "$1" "$tmp/base_bak.apk"
+		local x="${tmp}/base.apk"
+		local src_apk="${tmp}/base.apk"
 	elif [[ "$file_content2" = *".apk"* ]]; then
 		printd "[v] Target type: Multi-Bundle\n"
 		local multi_bundle="yes"
-		local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk '{print $4}' | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
+		local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g')"
+		#local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
 		if [ -z "$native_arch" ]; then
 			local native_arch="NoNative"
 		fi
@@ -183,6 +239,7 @@ func_process_apk()
 		unzip -pqq "$1" "$file_content2">"${tmp}/base.apk"
 		local suffix="apks"
 		local x="${tmp}/base.apk"
+		local src_apk="$1"
 	else
 		printd "[!] faild to detect APK type of: '$1'\n"
 		return
@@ -224,14 +281,19 @@ func_process_apk()
 	fi
 
     # combine stage
-	local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
-	local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
+	if [ "$library_mode" = "yes" ]; then
+		local pattern_name2="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch})"
+		local final_name2=$(echo $pattern_name2 | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
+	fi
+		local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
+		local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
 
 	echo
-	func_rename "$1" "$output_dir/$final_name"
-	echo "[!] APK Location: $output_dir"
-	echo "[!] Old name: $old_name"
-	echo "[x] New name: $final_name"
+	if [ "$library_mode" = "yes" ]; then
+		func_dup_rename "$label" "$suffix" "$library_dir" "$src_apk" "$final_name2"
+	else
+		func_rename "$src_apk" "$output_dir/$final_name"
+	fi
 	echo
 	printf -- "- - - - - - - - - - - - - - - - - - - -\n"
 	echo
@@ -303,7 +365,6 @@ while getopts i:o:l option
 				?) func_usage;;
 			esac
 done
-                
 
 	func_config $@
 	func_find_apk
