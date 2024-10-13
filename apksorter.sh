@@ -280,6 +280,9 @@ func_process_apk()
 		# parsing time
 		local manifest=$(aapt d badging "$x")
 		local label=$(echo $manifest | grep -Po "(?<=application: label=')(.+?)(?=')")
+	if [ -z "$label" ]; then
+		local label=$(echo $manifest | grep -Po "(?<=application-label:')(.+?)(?=')")
+	fi
 		local package_name=$(echo $manifest | grep -Po "(?<=package: name=')(.+?)(?=')")
 		local version_code=$(echo $manifest | grep -Po "(?<=versionCode=')(.+?)(?=')")
 		local version_name=$(echo $manifest | grep -Po "(?<=versionName=')(.+?)(?=')")
