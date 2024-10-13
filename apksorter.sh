@@ -36,11 +36,11 @@ func_config()
 		# check system
 	if [[ "$PREFIX" = *"com.termux"* ]]; then
 		tmp="/sdcard/Android/media/tmp"
-		library_dir="/sdcard/Android/media/APK-Library"
+		local library_dir="/sdcard/Android/media"
 		printd "[v] Running on host: termux-android\n"
 	else
 		tmp=~/tmp
-		library_dir=~/APK-Library
+		local library_dir=~/
 		printd "[v] Running on host: Linux/GNU\n"
 	fi
 			# make tmp dir
@@ -54,27 +54,39 @@ func_config()
 			exit 0
 		fi
 	fi
-		# output dir
 	if [ "$target_dir" = "./input" ] || [ "$target_dir" = "input" ]; then
-		if [ -z "$output_dir" ]; then
-			output_mode="normal"
-			output_dir="./renamed"
-			func_mkdir "$output_dir"
-		fi
-	else
+		output_mode="normal"
+	elif [ ! -z "$target_dir" ] && [ "$output_mode" != "custom" ]; then
 		output_mode="dynamic"
+	fi
+		# output dir
+	if [ "$output_mode" = "normal" ]; then
+		output_dir="./renamed"
+		func_mkdir "$output_dir"
+	elif [ "$output_mode" = "dynamic" ]; then
+		output_dir=""
+	elif [ "$output_mode" = "custom" ]; then
+		func_mkdir "$output_dir"
 	fi
 		# overwrite with library dir
 	if [ "$library_mode" = "yes" ]; then
-			output_mode="library"
-			output_dir="$library_dir"
+		if [ "$output_mode" = "dynamic" ]; then
+			output_dir="$library_dir/APK-Library"
 			func_mkdir "$output_dir"
+			output_mode="library"
+		elif [ "$output_mode" = "custom" ]; then
+			output_dir="$output_dir/APK-Library"
+			func_mkdir "$output_dir"
+			output_mode="library"
+		fi
 	fi
+
 		printd "[v] Target directory: '${target_dir}'\n"
 		printd "[v] Output directory: '${output_dir}'\n"
 		printd "[v] Output mode: '${output_mode}'\n"
 		printf "${0}: func_config: $(date)\n">>"$tmp/opertion.log"
 		printf -- "- - - - - - - - - - - - - - - - - - - -\n"
+
 }
 
 func_rename()
@@ -290,7 +302,7 @@ func_process_apk()
 
 	echo
 	if [ "$library_mode" = "yes" ]; then
-		func_dup_rename "$label" "$suffix" "$library_dir" "$src_apk" "$final_name2"
+		func_dup_rename "$label" "$suffix" "$output_dir" "$src_apk" "$final_name2"
 	else
 		func_rename "$src_apk" "$output_dir/$final_name"
 	fi
@@ -360,7 +372,7 @@ while getopts i:o:l option
 				case "${option}"
 		in
 				i) target_dir="${OPTARG}";;
-				o) output_dir="${OPTARG}";;
+				o) output_mode="custom"; output_dir="${OPTARG}";;
 				l) library_mode="yes";;
 				?) func_usage;;
 			esac
