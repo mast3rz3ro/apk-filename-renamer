@@ -133,12 +133,18 @@ func_dup_rename()
 	
 	# increasment rename (pain!)
 	local i=0
-	while [ -e "$src" ]; do
+	while true; do
 	local i=$((i+1))
-		if [ ! -e "${dst}.${suffix}" ]; then
+		if [ "$i" -ge "21"  ]; then
+			printd "[!] Skipping since 20 tries is reached: '${dst}.${suffix}'\n"
+			printf "${0}: func_dup_rename: max tries is reached(${i}): $x\n">>"$tmp/opertion.log"
+			break
+		elif [ ! -e "${dst}.${suffix}" ]; then
 			func_rename "$src" "${dst}.${suffix}"
+			break
 		elif [ ! -e "${dst}_${i}.${suffix}" ]; then
 			func_rename "$src" "${dst}_${i}.${suffix}"
+			break
 		fi
 	done
 }
@@ -234,6 +240,7 @@ func_process_apk()
 		printd "[v] Extracting as: '${tmp}/base.apk'\n"
 		unzip -pqq "$1" "$apk">"${tmp}/base.apk"
 		printd "[v] Moving unneedeed file into: '${tmp}/base_bak.apk'\n"
+		printf "${0}: func_process_apk: removing file from: '$1' into: '${tmp}/base_bak.apk'\n">>"$tmp/opertion.log"
 		mv --backup=t "$1" "$tmp/base_bak.apk"
 		local x="${tmp}/base.apk"
 		local src_apk="${tmp}/base.apk"
@@ -295,13 +302,14 @@ func_process_apk()
     # combine stage
 	if [ "$library_mode" = "yes" ]; then
 		local pattern_name2="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch})"
-		local final_name2=$(echo $pattern_name2 | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
+		local final_name2=$(echo $pattern_name2 | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g" | tr -d ":'" | tr " " "+")
 	fi
 		local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
-		local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g" | tr -d "'" | tr " " "+")
+		local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g" | tr -d "'" | tr " " "+")
 
 	echo
 	if [ "$library_mode" = "yes" ]; then
+		local label="$(printf -- "$label" | sed "s/: //g")"
 		func_dup_rename "$label" "$suffix" "$output_dir" "$src_apk" "$final_name2"
 	else
 		func_rename "$src_apk" "$output_dir/$final_name"
