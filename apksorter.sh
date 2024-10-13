@@ -175,12 +175,20 @@ func_stats ()
 	if [ -z "$mv_err3" ]; then
 		mv_err3="0"
 	fi
+	if [ -z "$total_split" ]; then
+		total_split="0"
+	fi
+	if [ -z "$total_unknown" ]; then
+		total_unknown="0"
+	fi
 		local total_skipped="$(expr "$total_files" - "$total_apk")"
 		local total_rename_fails="$(expr "$mv_err1" + "$mv_err2" + "$mv_err3" )"
 		printf "[x] Total proccedd APK: ${total_apk}\n"
 		printf "[x] Total skipped none APK: ${total_skipped}\n"
 		printf "[x] Total successfully renamed (mv cmd): ${mv_err0}\n"
 		printf "[x] Total failed to rename (mv cmd): ${total_rename_fails}\n"
+		printd "[v] Total proccedd single-split: ${total_split}\n"
+		printd "[v] Total failed to detect APK: ${total_unknown}\n"
 		printd "[v] Total already renamed (mv cmd): ${mv_err2}\n"
 		printd "[v] Total permission denied (mv cmd): ${mv_err3}\n"
 		printd "[v] Total unknown error (mv cmd): ${mv_err1}\n"
@@ -235,7 +243,15 @@ func_process_apk()
 		local file_content2="$(printf -- "$file_content" | grep -E "\.apk|resources.arsc" | grep -ivE "archive:|assets/|config\..*\.apk|split_.*\.apk|.*/.*\.apk")"
 		printd "[v] File contents (filtered): '${file_content2}'\n"
 
-	if [[ "$file_content2" = *"resources.arsc"* ]]; then
+	if [ "$(printf -- "$manifest" | grep -ocm1 "split='.*'")" = "1" ]; then
+		printd "[v] Target type: Single-Split\n"
+		local multi_bundle="yes"
+		local manifest=$(aapt d badging "$1")
+		local local split_name=$(echo $manifest | grep -Po "(?<=split=')(.+?)(?=')")
+		func_rename "$1" "$output_dir/$split_name.apk"
+		total_split=$((total_split+1))
+		return
+	elif [[ "$file_content2" = *"resources.arsc"* ]]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
 		local native_arch=""
@@ -273,6 +289,8 @@ func_process_apk()
 		local src_apk="$1"
 	else
 		printd "[!] faild to detect APK type of: '$1'\n"
+		printf "${0}: func_process_apk: faild to detect APK type of: '$1'\n">>"$tmp/opertion.log"
+		total_unknown=$((total_unknown+1))
 		return
 	fi
 		total_apk=$((total_apk+1))
@@ -283,6 +301,7 @@ func_process_apk()
 	if [ -z "$label" ]; then
 		local label=$(echo $manifest | grep -Po "(?<=application-label:')(.+?)(?=')")
 	fi
+		#local split_name=$(echo $manifest | grep -Po "(?<=split=')(.+?)(?=')")
 		local package_name=$(echo $manifest | grep -Po "(?<=package: name=')(.+?)(?=')")
 		local version_code=$(echo $manifest | grep -Po "(?<=versionCode=')(.+?)(?=')")
 		local version_name=$(echo $manifest | grep -Po "(?<=versionName=')(.+?)(?=')")
@@ -317,10 +336,10 @@ func_process_apk()
     # combine stage
 	if [ "$library_mode" = "yes" ]; then
 		local pattern_name2="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch})"
-		local final_name2=$(echo $pattern_name2 | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g" | tr -d ":'" | tr " " "+")
+		local final_name2=$(echo $pattern_name2 | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g; s/icon=//g; s/split=//g" | tr -d ":'" | tr " " "+")
 	fi
 		local pattern_name="${label}_(v${version_name}-${version_code}_${stamp})_(${package_name}_${min_ver}+${max_ver}_${native_arch}).$suffix"
-		local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g" | tr -d "'" | tr " " "+")
+		local final_name=$(echo $pattern_name | tr -d '\\' | tr -d '/' | sed "s/alt\-native\-code: '//; s/' '/+/g; s/armeabi/arm/g; s/-v/_v/g; s/: //g; s/icon=//g; s/split=//g" | tr -d "'" | tr " " "+")
 
 	echo
 	if [ "$library_mode" = "yes" ]; then
