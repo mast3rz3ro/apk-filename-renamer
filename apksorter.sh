@@ -181,6 +181,9 @@ func_stats ()
 	if [ -z "$total_unknown" ]; then
 		total_unknown="0"
 	fi
+	if [ -z "$total_combined" ]; then
+		total_combined="0"
+	fi
 		local total_skipped="$(expr "$total_files" - "$total_apk")"
 		local total_rename_fails="$(expr "$mv_err1" + "$mv_err2" + "$mv_err3" )"
 		printf "[x] Total proccedd APK: ${total_apk}\n"
@@ -188,6 +191,7 @@ func_stats ()
 		printf "[x] Total successfully renamed (mv cmd): ${mv_err0}\n"
 		printf "[x] Total failed to rename (mv cmd): ${total_rename_fails}\n"
 		printd "[v] Total proccedd single-split: ${total_split}\n"
+		printd "[v] Total proccedd combined-apk: ${total_combined}\n"
 		printd "[v] Total failed to detect APK: ${total_unknown}\n"
 		printd "[v] Total already renamed (mv cmd): ${mv_err2}\n"
 		printd "[v] Total permission denied (mv cmd): ${mv_err3}\n"
@@ -221,6 +225,59 @@ func_find_apk()
 	fi
 }
 
+iserr0()
+{
+	if [ "$?" = "0" ]; then
+		return 0
+	else
+		local func="$1"
+		local msg="$2"
+		local cmd="$3"
+		local cmd_err="$(cat "${tmp}/err" | sed -z 's/\n/_newline_/g')"
+		printd "[v] ${msg}\n"
+		printf "${0}: ${func}: ${msg} $cmd: $cmd_err\n">>"$tmp/opertion.log"
+		return 1
+	fi
+}
+
+func_extract_apk()
+{
+		local mode="$1"
+		local x="$2"
+		local c="$3"
+	if [ "$mode" = "main" ]; then
+		local t="$(printf -- "$c" | grep -F ".apk")"
+		printd "[v] Extracting main APK: '$t'\n"
+		printd "[v] Extracting as: '${tmp}/base.apk'\n"
+		unzip -pqq "$x" "$t">"${tmp}/base.apk" 2>"${tmp}/err"
+		iserr0 "func_extract_apk" "failed extracting: ${t}" "unzip_main"
+		printd "[v] Moving unneedeed file into: '${tmp}/base_bak.apk'\n"
+		printf "${0}: func_process_apk: removing file: '$x' into: '${tmp}/base_bak.apk'\n">>"$tmp/opertion.log"
+		mv --backup=t "$x" "$tmp/base_bak.apk"
+	elif [ "$mode" = "base" ]; then
+		printd "[v] Extracting base APK: '$c'\n"
+		printd "[v] Extracting as: '${tmp}/base.apk'\n"
+		unzip -pqq "$x" "$c">"${tmp}/base.apk" 2>"${tmp}/err"
+		iserr0 "func_extract_apk" "failed extracting: ${c}" "unzip_base"
+	elif [ "$mode" = "obb" ]; then
+		#local t="$(printf -- "$c" | grep -vF ".obb")"
+		printd "[v] Extracting combined APK: '$c'\n"
+		printd "[v] Extracting as: '${tmp}/base.apk'\n"
+		unzip -pqq "$x" "$c">"${tmp}/base.apk" 2>"${tmp}/err"
+		iserr0 "func_extract_apk" "failed extracting: ${c}" "unzip_obb"
+	fi
+}
+
+func_parse_arch()
+{
+		native_arch="$(printf -- "$1" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g')"
+		#local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
+		if [ -z "$native_arch" ]; then
+			native_arch="NoNative"
+		fi
+		printd "[v] Native Arch: '$native_arch'\n"
+}
+
 func_process_apk()
 {
 		printd "[v] Processing file: '${1}'\n"
@@ -236,24 +293,47 @@ func_process_apk()
 
 		# determine apk type
 		printd "[v] Getting file contents..\n"
-		local file_content="$(unzip -lqq "$1" | grep -E "\.apk|resources.arsc|\.RSA|\.DSA" | awk '{print $4}')"
+		local file_content="$(unzip -lqq "$1" 2>"${tmp}/err" | grep -E "\.apk|resources.arsc|\.RSA|\.DSA|\.obb" | awk '{print $4}')"
+	if [ -s "${tmp}/err" ]; then
+		printd "[v] Skipping damaged zipfile: '${1}'\n"
+		printf "${0}: func_process_apk: skipping possibly damaged zipfile: '$1'\n">>"$tmp/opertion.log"
+		return
+	fi
 		local void="$(printf "${file_content}" | tr '\n' ' ')"
 		printd "[v] File contents: '${void}'\n"
 		
 		local file_content2="$(printf -- "$file_content" | grep -E "\.apk|resources.arsc" | grep -ivE "archive:|assets/|config\..*\.apk|split_.*\.apk|.*/.*\.apk")"
 		printd "[v] File contents (filtered): '${file_content2}'\n"
+		
+		# idenify if single-split
+		local manifest=$(aapt d badging "$1")
 
 	if [ "$(printf -- "$manifest" | grep -ocm1 "split='.*'")" = "1" ]; then
 		printd "[v] Target type: Single-Split\n"
 		local multi_bundle="yes"
-		local manifest=$(aapt d badging "$1")
+		local category="Android-Apps"
 		local local split_name=$(echo $manifest | grep -Po "(?<=split=')(.+?)(?=')")
 		func_rename "$1" "$output_dir/$split_name.apk"
 		total_split=$((total_split+1))
 		return
+	elif [ "$(printf -- "$file_content" | grep -Fcm1 ".obb")" = "1" ]; then
+		printd "[v] Target type: OBB-Combined\n"
+		local multi_bundle="yes"
+		local category="Android-Games"
+		local native_arch=""
+		local suffix="apkm"
+		local native_arch=""
+			func_extract_apk "obb" "$1" "$file_content2"
+		if [ "$?" != "0" ]; then
+			return
+		fi
+		local x="${tmp}/base.apk"
+		local src_apk="$1"
+		total_combined=$((total_combined+1))
 	elif [[ "$file_content2" = *"resources.arsc"* ]]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
+		local category="Android-Apps"
 		local native_arch=""
 		local suffix="apk"
 		local x="$1"
@@ -261,30 +341,25 @@ func_process_apk()
 	elif [ "$(printf "$file_content" | grep -ocF ".apk")" = "1" ]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
+		local category="Android-Apps"
 		local native_arch=""
 		local suffix="apk"
-		local apk="$(printf -- "$file_content" | grep -F ".apk")"
-		printd "[v] Extracting APK: '$apk'\n"
-		printd "[v] Extracting as: '${tmp}/base.apk'\n"
-		unzip -pqq "$1" "$apk">"${tmp}/base.apk"
-		printd "[v] Moving unneedeed file into: '${tmp}/base_bak.apk'\n"
-		printf "${0}: func_process_apk: removing file from: '$1' into: '${tmp}/base_bak.apk'\n">>"$tmp/opertion.log"
-		mv --backup=t "$1" "$tmp/base_bak.apk"
+			func_extract_apk "main" "$1" "$file_content"
+		if [ "$?" != "0" ]; then
+			return
+		fi
 		local x="${tmp}/base.apk"
 		local src_apk="${tmp}/base.apk"
 	elif [[ "$file_content2" = *".apk"* ]]; then
 		printd "[v] Target type: Multi-Bundle\n"
 		local multi_bundle="yes"
-		local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g')"
-		#local native_arch="$(printf -- "$file_content" | grep -iE "x86|arm|mips" | awk -F 'config.' '{print $2}' | sort | uniq -c | awk '{print $2}' | tr -d " \n" | sed 's/\.apk//g; s/aarm/a+arm/g; s/abia/abi+a/g; s/ax86/a+x86/g; s/x86x86/x86+x86/g')"
-		if [ -z "$native_arch" ]; then
-			local native_arch="NoNative"
-		fi
-		printd "[v] Native Arch: '$native_arch'\n"
-		printd "[v] Extracting base APK: '$file_content2'\n"
-		printd "[v] Extracting as: '${tmp}/base.apk'\n"
-		unzip -pqq "$1" "$file_content2">"${tmp}/base.apk"
+		local category="Android-Apps"
 		local suffix="apks"
+		func_parse_arch "$file_content"
+			func_extract_apk "base" "$1" "$file_content2"
+		if [ "$?" != "0" ]; then
+			return
+		fi
 		local x="${tmp}/base.apk"
 		local src_apk="$1"
 	else
@@ -344,9 +419,9 @@ func_process_apk()
 	echo
 	if [ "$library_mode" = "yes" ]; then
 		local label="$(printf -- "$label" | sed "s/: //g")"
-		func_dup_rename "$label" "$suffix" "$output_dir" "$src_apk" "$final_name2"
+		func_dup_rename "$label" "$suffix" "$output_dir/${category}" "$src_apk" "$final_name2"
 	else
-		func_rename "$src_apk" "$output_dir/$final_name"
+		func_rename "$src_apk" "$output_dir/${category}/$final_name"
 	fi
 	echo
 	printf -- "- - - - - - - - - - - - - - - - - - - -\n"
