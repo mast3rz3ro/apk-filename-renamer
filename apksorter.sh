@@ -278,6 +278,20 @@ func_parse_arch()
 		printd "[v] Native Arch: '$native_arch'\n"
 }
 
+func_detect_category()
+{
+		local apk="$1"
+		# determine category (need more work!)
+	if [ "$library_mode" = "yes" ]; then
+			printd "[v] Detecting APK category: '$apk'\n"
+		if [ "$(grep -cFm1 "getObbDirs" "$apk")" = "1" ]; then
+			category="Android-Games"
+		else
+			category="Android-Apps"
+		fi
+	fi
+}
+
 func_process_apk()
 {
 		printd "[v] Processing file: '${1}'\n"
@@ -311,15 +325,14 @@ func_process_apk()
 	if [ "$(printf -- "$manifest" | grep -ocm1 "split='.*'")" = "1" ]; then
 		printd "[v] Target type: Single-Split\n"
 		local multi_bundle="yes"
-		local category="Android-Apps"
 		local local split_name=$(echo $manifest | grep -Po "(?<=split=')(.+?)(?=')")
 		func_rename "$1" "$output_dir/$split_name.apk"
 		total_split=$((total_split+1))
+		func_detect_category "$x"
 		return
 	elif [ "$(printf -- "$file_content" | grep -Fcm1 ".obb")" = "1" ]; then
 		printd "[v] Target type: OBB-Combined\n"
 		local multi_bundle="yes"
-		local category="Android-Games"
 		local native_arch=""
 		local suffix="apkm"
 		local native_arch=""
@@ -330,18 +343,18 @@ func_process_apk()
 		local x="${tmp}/base.apk"
 		local src_apk="$1"
 		total_combined=$((total_combined+1))
+		func_detect_category "$x"
 	elif [[ "$file_content2" = *"resources.arsc"* ]]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
-		local category="Android-Apps"
 		local native_arch=""
 		local suffix="apk"
 		local x="$1"
 		local src_apk="$1"
+		func_detect_category "$x"
 	elif [ "$(printf "$file_content" | grep -ocF ".apk")" = "1" ]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
-		local category="Android-Apps"
 		local native_arch=""
 		local suffix="apk"
 			func_extract_apk "main" "$1" "$file_content"
@@ -350,10 +363,10 @@ func_process_apk()
 		fi
 		local x="${tmp}/base.apk"
 		local src_apk="${tmp}/base.apk"
+		func_detect_category "$x"
 	elif [[ "$file_content2" = *".apk"* ]]; then
 		printd "[v] Target type: Multi-Bundle\n"
 		local multi_bundle="yes"
-		local category="Android-Apps"
 		local suffix="apks"
 		func_parse_arch "$file_content"
 			func_extract_apk "base" "$1" "$file_content2"
@@ -362,6 +375,7 @@ func_process_apk()
 		fi
 		local x="${tmp}/base.apk"
 		local src_apk="$1"
+		func_detect_category "$x"
 	else
 		printd "[!] faild to detect APK type of: '$1'\n"
 		printf "${0}: func_process_apk: faild to detect APK type of: '$1'\n">>"$tmp/opertion.log"
