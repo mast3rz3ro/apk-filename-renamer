@@ -27,7 +27,11 @@ func_deps()
 printd()
 {
 	if [ "$verbose" = "yes" ]; then
-		printf -- "$1"
+		if [ -z "$2" ]; then
+			printf -- "$1"
+		elif [ ! -z "$2" ]; then
+			printf -- "$1" >>"$tmp/opertion.log"
+		fi
 	fi
 }
 
@@ -220,7 +224,7 @@ func_find_apk()
 	if [ "$total_files" != "0" ]; then
 		func_stats
 	else
-		printf "[!] The target directory is empty: '${output_dir}'\n"
+		printf "[!] The target directory is empty: '${target_dir}'\n"
 		exit 0
 	fi
 }
@@ -280,15 +284,27 @@ func_parse_arch()
 
 func_detect_category()
 {
-		local apk="$1"
-		# determine category (need more work!)
+
+		# determine category (need improve !)
+		local x="$1"
+		local src="$2"
 	if [ "$library_mode" = "yes" ]; then
-			printd "[v] Detecting APK category: '$apk'\n"
-		if [ "$(grep -cFm1 "getObbDirs" "$apk")" = "1" ]; then
-			category="Android-Games"
-		else
-			category="Android-Apps"
-		fi
+			printd "[v] Detecting APK category: '$x'\n"
+			local list="$(unzip -l "$x" lib* *.dex | awk '{print $4}' | sed '/Name/d; /----/d')"
+		for t in $list; do
+				# apparently most apps unnecessary includes getObbDir, should we blame androidSDK for that?
+				#result="$(unzip -pqq "$x" "$t" | grep -cao "getObbDir.[^s]")" # look for dir(X) but not dir(s), getObbDir and getObbDirs are totally different. matching libs(.so) are accurate but not for .dex !
+				#printd "${0}: verbose: func_detect_category: getObbDir result (all): '${result}' from: '$t' inside: '$src'\n" write_into_log
+				printd "${0}: verbose: func_detect_category: found (verbose): '$t' inside: '$src'\n" write_into_log
+				local c="${t##*/}"
+			if [ "$c" = "libunity.so" ] || [ "$c" = "libUE4.so" ]; then
+				category="Android-Games"
+				printd "${0}: func_detect_category: found: '$t' inside: '$src'\n" write_into_log
+				break
+			else
+				category="Android-Apps"
+			fi
+		done
 	fi
 }
 
@@ -328,7 +344,7 @@ func_process_apk()
 		local local split_name=$(echo $manifest | grep -Po "(?<=split=')(.+?)(?=')")
 		func_rename "$1" "$output_dir/$split_name.apk"
 		total_split=$((total_split+1))
-		func_detect_category "$x"
+		#func_detect_category "$x" "$src_apk"
 		return
 	elif [ "$(printf -- "$file_content" | grep -Fcm1 ".obb")" = "1" ]; then
 		printd "[v] Target type: OBB-Combined\n"
@@ -343,7 +359,7 @@ func_process_apk()
 		local x="${tmp}/base.apk"
 		local src_apk="$1"
 		total_combined=$((total_combined+1))
-		func_detect_category "$x"
+		func_detect_category "$x" "$src_apk"
 	elif [[ "$file_content2" = *"resources.arsc"* ]]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
@@ -351,7 +367,7 @@ func_process_apk()
 		local suffix="apk"
 		local x="$1"
 		local src_apk="$1"
-		func_detect_category "$x"
+		func_detect_category "$x" "$src_apk"
 	elif [ "$(printf "$file_content" | grep -ocF ".apk")" = "1" ]; then
 		printd "[v] Target type: APK\n"
 		local multi_bundle="no"
@@ -363,7 +379,7 @@ func_process_apk()
 		fi
 		local x="${tmp}/base.apk"
 		local src_apk="${tmp}/base.apk"
-		func_detect_category "$x"
+		func_detect_category "$x" "$src_apk"
 	elif [[ "$file_content2" = *".apk"* ]]; then
 		printd "[v] Target type: Multi-Bundle\n"
 		local multi_bundle="yes"
@@ -375,7 +391,7 @@ func_process_apk()
 		fi
 		local x="${tmp}/base.apk"
 		local src_apk="$1"
-		func_detect_category "$x"
+		func_detect_category "$x" "$src_apk"
 	else
 		printd "[!] faild to detect APK type of: '$1'\n"
 		printf "${0}: func_process_apk: faild to detect APK type of: '$1'\n">>"$tmp/opertion.log"
