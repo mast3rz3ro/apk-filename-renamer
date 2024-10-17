@@ -290,27 +290,42 @@ func_detect_category()
 		local src="$2"
 	if [ "$library_mode" = "yes" ]; then
 			printd "[v] Detecting APK category: '$x'\n"
-			local list="$(unzip -l "$x" lib* *.dex | awk '{print $4}' | sed '/Name/d; /----/d')"
-		for t in $list; do
+			local list="$(unzip -l "$x" lib* *.dex AndroidManifest.xml *xposed_init | awk '{print $4}' | sed '/Name/d; /----/d' | tr '\n' ' ')"
+			echo "${0}: func_detect_category: found files: '$list' inside: '$src'\n">>"$tmp/opertion.log"
+		for i in $list; do
 				# apparently most apps unnecessary includes getObbDir, should we blame androidSDK for that?
 				#result="$(unzip -pqq "$x" "$t" | grep -cao "getObbDir.[^s]")" # look for dir(X) but not dir(s), getObbDir and getObbDirs are totally different. matching libs(.so) are accurate but not for .dex !
 				#printd "${0}: verbose: func_detect_category: getObbDir result (all): '${result}' from: '$t' inside: '$src'\n" write_into_log
-				printd "${0}: verbose: func_detect_category: found (verbose): '$t' inside: '$src'\n" write_into_log
-				local c="${t##*/}"
-			if [ "$c" = "libunity.so" ] || [ "$c" = "libUE4.so" ]; then
-				category="Android-Games"
-				printd "${0}: func_detect_category: found: '$t' inside: '$src'\n" write_into_log
+				local f="${i##*/}"
+			if [ "$f" = "libunity.so" ] || [ "$f" = "libUE4.so" ]; then
+				category="APK-Games"
 				break
-			else
-				category="Android-Apps"
+			elif [ "$f" = "xposed_init" ]; then
+				category="Xposed-Apps"
+				break
+			elif [ "$f" = "AndroidManifest.xml" ]; then
+							# shipping axmldec binary may considered in feature
+							# androidSDK provides an atttibute in manifest which can declare the app category.
+							# however many apps perfers to not use this attribute and instead rely on PlayStore scheme (domains ids?).
+							r="$(unzip -pqq "$x" "$f" | tr -d "\0" | grep -Eoc "category\.GAME|android\.hardware\.gamepad|com\.google\.android\.gms\.games\.APP_ID|com\.facebook\.unity\.FBUnityGameRequestActivity")"
+						if [ "$r" -ge "1" ]; then
+							category="APK-Games"
+							break
+						fi
+							r="$(unzip -pqq "$x" "$f" | tr -d "\0" | grep -Eoc "android\.permission\.WRITE_MEDIA_STORAGE|android\.permission\.WRITE_EXTERNAL_STORAGE|android\.permission\.MANAGE_EXTERNAL_STORAGE")"
+						if [ "$r" -ge "1" ]; then
+							category="File-Managers"
+							break
+						fi
 			fi
+				category="Other-Apps"
 		done
 	fi
 }
 
 func_process_apk()
 {
-		printd "[v] Processing file: '${1}'\n"
+		printf "[x] Processing file: '${1}'\n"
 		local check_zip="$(file "${1}")"
 	if [[ "$check_zip" != *"Zip archive"* ]]; then
 		if [[ "$check_zip" != *"Android package"* ]]; then
@@ -448,7 +463,7 @@ func_process_apk()
 
 	echo
 	if [ "$library_mode" = "yes" ]; then
-		local label="$(printf -- "$label" | sed "s/: //g")"
+		local label="$(printf -- "$label" | sed "s/: //g; s/./-/g")"
 		func_dup_rename "$label" "$suffix" "$output_dir/${category}" "$src_apk" "$final_name2"
 	else
 		func_rename "$src_apk" "$output_dir/${category}/$final_name"
@@ -514,17 +529,22 @@ sdk_list="\
 		fi
 }
 
-while getopts i:o:l option
+while getopts i:o:lc option
 		do
 				case "${option}"
 		in
 				i) target_dir="${OPTARG}";;
 				o) output_mode="custom"; output_dir="${OPTARG}";;
 				l) library_mode="yes";;
+				c) clean_mode="yes";;
 				?) func_usage;;
 			esac
 done
 
-	func_deps
-	func_config $@
-	func_find_apk
+		func_deps
+		func_config $@
+		func_find_apk
+	if [ "$library_mode" = "yes" ] && [ "$clean_mode" = "yes" ]; then
+		echo "[x] Cleaning-up Library directory: '$output_dir' "
+		find "$output_dir" -mindepth 1 -type d -empty -delete
+	fi
