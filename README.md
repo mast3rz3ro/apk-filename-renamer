@@ -82,9 +82,14 @@ git clone https://github.com/mast3rz3ro/apksorter ~/apksorter/apksorter && chmod
 **Current parameters:**
 
 ```Bash
-	-i	input/target directory
-	-o	output directory
-	-l	enable library mode
+ Usage: apksorter [parameters]
+
+ Parameters:   Description:
+        -i      Input directory (place where to find APK).
+        -o      Output directory (place to store APK after renamed).
+        -a      Archive mode (store APK in more reliable way).
+        -c      Clean empty dirs (only used with archive mode).
+        -g      generate identifiers (used for db).
 	
 	# Note: by default apksorter renames apk into their own directory
 	# however you can override this behaivor by using -o switch
@@ -95,30 +100,41 @@ git clone https://github.com/mast3rz3ro/apksorter ~/apksorter/apksorter && chmod
 - Rename within any place where`input` directory exists.
 
 ```Bash
-apksorter
+$ ls
+input
+$ apksorter
+$ ls
+input renamed
 ```
 
 - Rename without creating the `input` directory:
 
 ```Bash
-apksorter -i /some/folder
+$ apksorter -i /some/folder
 ```
 - Override the output directory:
 
-```
-apksorter -i /some/folder -o /some/other/newdir
+```Bash
+d$ apksorter -i /some/folder -o /some/other/newdir
 ```
 
-- Enable library mode:
+- Archive APK in default directory of apk-sorter:
+```Bash
+$ apksorter -a -i /somedir/otherdir
+  # Android: /sdcard/Android/media/APK-Library
+  # Linux: ~/APK-Library
+```
+
+- Enable archive mode:
 
 ```Bash
-apksorter -i /some/folder -o /some/other/newdir -l
+$ apksorter -i /some/folder -o /some/other/newdir -a
 ```
 
 - Enable verbosity mode:
 
 ```Bash
-export verbose=yes
+$ export verbose=yes
 
 	# Note: To detect errors quickly see: "opertion.log" which is stored on ~tmp directory.
 ```
